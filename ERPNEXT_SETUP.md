@@ -62,8 +62,8 @@ ssh root@<your-vps-ip>
 ```
 
 ### 1.3 Point mechotronix.in's DNS at the VPS (Hostinger)
-If Hostinger is also where `mechotronix.in`'s DNS is managed (i.e. the domain
-uses Hostinger's nameservers), go to:
+Since both the domain and the VPS are on Hostinger, this is a straightforward
+in-panel change:
 
 **hPanel → Domains → mechotronix.in → DNS / Name Servers → DNS Zone Editor**
 
@@ -74,11 +74,10 @@ Add a new record:
 
 Click **Add Record**. This makes `erp.mechotronix.in` resolve to your VPS.
 
-> If `mechotronix.in` is registered elsewhere and only *hosted* on Hostinger
-> (or vice versa), add the same A record in whichever panel actually controls
-> its DNS zone — check **hPanel → Domains → mechotronix.in → DNS** first; if
-> it shows "nameservers not managed by Hostinger," make the change at your
-> registrar instead.
+> Note: if `mechotronix.in` currently has its main **A** or **CNAME** record
+> pointing at Hostinger's shared web hosting (e.g. for an existing website),
+> that's unrelated and untouched — you're only adding a new record for the
+> `erp` subdomain, not changing the root domain.
 
 **Wait and verify** (Hostinger's DNS usually propagates within 15–30 minutes,
 occasionally longer):
