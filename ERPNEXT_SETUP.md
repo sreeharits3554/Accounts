@@ -1,85 +1,153 @@
-# Self-Hosting ERPNext for Mechotronix (erp.mechotronix.in)
+# Self-Hosting ERPNext for Mechotronix — Complete Setup Guide (erp.mechotronix.in)
 
-## Database question first
-ERPNext (built on the **Frappe framework**) uses **MariaDB** as its database by
-default — this is what almost everyone runs in production, and what the official
-Docker images ship with. Frappe also has experimental **PostgreSQL** support, but
-it is not the well-trodden path (fewer apps test against it, some features assume
-MariaDB). **Use MariaDB.**
+This is a start-to-finish walkthrough: buying a server, pointing your domain
+at it, installing the stack, creating your company, and going live. Follow
+it top to bottom in order — each step assumes the one before it worked.
 
-Alongside MariaDB, the stack also needs:
-- **Redis** — caching, background job queue, and real-time updates (Socket.IO)
-- **Node.js** — only needed at build/setup time, for compiling frontend assets
-
-You don't manage any of this by hand — the Docker setup below runs MariaDB, Redis,
-the app server, a background worker, and an Nginx frontend as separate containers.
+**Time needed:** roughly 2–3 hours for the technical setup (steps 1–8),
+spread over a day or two once you count DNS propagation waiting time.
 
 ---
 
-## Recommended deployment method: Docker (frappe_docker)
+## Part 0 — What you're building
 
-Frappe's own team maintains `frappe_docker`, which is the standard way to
-self-host in production today (the older manual `bench` install on bare Ubuntu
-still works but is more fragile to maintain). We'll use Docker Compose.
+| Component | Technology | Why |
+|---|---|---|
+| Database | **MariaDB** | ERPNext's default and only well-supported DB |
+| Cache / job queue / live updates | **Redis** | Required by Frappe framework |
+| App server | **Frappe** (Python) + **ERPNext** app | The accounting/stock/HR system itself |
+| Compliance | **India Compliance** app | GST, e-invoice, e-way bill, TDS, PF/ESI |
+| Web server | **Nginx** | Serves the site, handles HTTPS |
+| SSL | **Let's Encrypt** (via Certbot) | Free auto-renewing HTTPS certificate |
+| Everything runs in | **Docker containers** | Isolated, reproducible, easy to update |
 
-### 0. What you need before starting
-- A Linux server (Ubuntu 22.04 LTS recommended) — a VPS from any Indian/global
-  provider (DigitalOcean, Hetzner, AWS Lightsail, etc.)
-  - **Minimum:** 2 vCPU, 4 GB RAM, 40 GB SSD — fine for 8 users
-  - **Comfortable:** 4 vCPU, 8 GB RAM — headroom for payroll runs, reports, backups
-- Root/sudo SSH access to that server
-- A subdomain pointed at the server: e.g. **erp.mechotronix.in**
-  - In your domain DNS (wherever mechotronix.in is managed), add an
-    **A record**: `erp` → `<your server's public IP>`
-  - Wait for DNS to propagate (`nslookup erp.mechotronix.in` should return your IP)
+You do not install MariaDB/Redis/Nginx yourself — Docker Compose starts all
+of them as containers that talk to each other. Your job is to configure and
+run a handful of commands.
 
 ---
 
-### 1. Prepare the server
+## Part 1 — Buy and set up the server
+
+### 1.1 Choose a provider and plan
+Any of these work well (pick one — no need to compare deeply):
+- **Hetzner Cloud** — cheapest, EU-based, good performance (CX22: 2 vCPU/4GB ≈ €4/mo)
+- **DigitalOcean** — easy UI, good docs (Basic Droplet: 2 vCPU/4GB ≈ $18/mo)
+- **AWS Lightsail** — if you already use AWS (2 vCPU/4GB plan)
+
+**Spec to choose:** Ubuntu 22.04 LTS, **2 vCPU / 4 GB RAM / 40+ GB SSD** minimum
+for 8 users. Pick a data center region close to India (Singapore/Mumbai if
+offered) for lower latency.
+
+### 1.2 Create the server
+On your provider's dashboard:
+1. Create a new server/droplet/instance
+2. Image: **Ubuntu 22.04 LTS**
+3. Add your **SSH public key** (if you don't have one, generate on your laptop:
+   `ssh-keygen -t ed25519 -C "you@mechotronix.in"`, then paste
+   `~/.ssh/id_ed25519.pub` into the provider's "SSH Keys" field)
+4. Launch it. Note down the **public IP address** it gives you, e.g. `142.93.x.x`
+
+### 1.3 Point your domain at the server (DNS)
+Log in wherever `mechotronix.in` is registered/managed (GoDaddy, BigRock,
+Cloudflare, whoever you bought/manage the domain through) and open **DNS
+Management / DNS Records**.
+
+Add:
+| Type | Host/Name | Value | TTL |
+|---|---|---|---|
+| A | `erp` | `<your server's public IP>` | Auto / 3600 |
+
+This makes `erp.mechotronix.in` resolve to your server. Save it.
+
+**Wait and verify** (can take a few minutes to a few hours):
+```bash
+# run this from your own laptop
+nslookup erp.mechotronix.in
+# or
+dig erp.mechotronix.in +short
+```
+It should print your server's IP. Don't move to Part 2 until this works —
+Let's Encrypt (step 5) will fail otherwise.
+
+---
+
+## Part 2 — Prepare the server
+
+SSH in (replace with your IP or, once DNS resolves, the hostname):
 ```bash
 ssh root@<server-ip>
-
-# Basic hardening
-apt update && apt upgrade -y
-adduser deploy && usermod -aG sudo deploy
-# (log back in as `deploy` from here on)
-
-# Firewall: allow SSH, HTTP, HTTPS only
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw enable
 ```
 
-### 2. Install Docker
+### 2.1 Update the system and create a non-root user
+```bash
+apt update && apt upgrade -y
+
+adduser deploy          # set a strong password when prompted
+usermod -aG sudo deploy
+
+# switch to it
+su - deploy
+```
+From here on, run commands as `deploy`, not `root`.
+
+### 2.2 Firewall
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp     # HTTP (needed for Let's Encrypt validation)
+sudo ufw allow 443/tcp    # HTTPS
+sudo ufw enable           # type 'y' to confirm
+sudo ufw status
+```
+
+### 2.3 Install Docker
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
-# log out and back in so the group applies
+```
+**Log out and log back in** (`exit`, then `ssh deploy@<server-ip>` again) so
+the docker group membership takes effect. Then verify:
+```bash
 docker --version
 docker compose version
 ```
+Both should print version numbers with no errors.
 
-### 3. Get frappe_docker
+---
+
+## Part 3 — Get the deployment files
+
 ```bash
 git clone https://github.com/frappe/frappe_docker
 cd frappe_docker
 ```
 
-### 4. Configure environment
+### 3.1 Create your environment file
 ```bash
 cp example.env .env
 nano .env
 ```
-Set at minimum:
+Edit/confirm these values (delete or comment out anything conflicting):
 ```
-ERPNEXT_VERSION=version-15          # current stable ERPNext branch
-DB_PASSWORD=<generate a strong password — save it in a password manager>
+ERPNEXT_VERSION=version-15
+FRAPPE_VERSION=version-15
+DB_PASSWORD=<generate a long random password>
 LETSENCRYPT_EMAIL=you@mechotronix.in
 SITES=`erp.mechotronix.in`
 ```
+**Generate a strong DB password** with:
+```bash
+openssl rand -base64 24
+```
+Copy that into `DB_PASSWORD=`. **Save this password somewhere safe** (password
+manager) — you'll need it again in Part 4.
 
-### 5. Bring up the stack with SSL (Let's Encrypt), using the official compose overlay
+Save and exit nano: `Ctrl+O`, `Enter`, `Ctrl+X`.
+
+---
+
+## Part 4 — Bring up the stack
+
 ```bash
 docker compose -f compose.yaml \
   -f overrides/compose.mariadb.yaml \
@@ -88,104 +156,221 @@ docker compose -f compose.yaml \
   --env-file .env \
   up -d
 ```
-This starts: MariaDB, Redis (cache + queue), the backend app server, a
-background worker, a scheduler, Nginx, and Certbot for automatic HTTPS on
-`erp.mechotronix.in`. First boot takes a few minutes while images download.
 
-Check everything is healthy:
+This pulls the images (MariaDB, Redis, Frappe backend, worker, scheduler,
+Nginx frontend, Certbot) and starts them in the background. **First run
+takes 5–10 minutes** depending on your connection.
+
+### 4.1 Verify everything is running
 ```bash
 docker compose ps
+```
+You should see containers like `frappe_docker-backend-1`,
+`frappe_docker-db-1`, `frappe_docker-redis-cache-1`,
+`frappe_docker-redis-queue-1`, `frappe_docker-frontend-1`,
+`frappe_docker-scheduler-1`, `frappe_docker-websocket-1`, `frappe_docker-queue-long-1`,
+`frappe_docker-queue-short-1` — all with status `Up` or `running`.
+
+If something shows `Exited` or `Restarting`, check its logs:
+```bash
+docker compose logs <container-name> --tail=100
+```
+
+### 4.2 Watch it come fully up
+```bash
 docker compose logs -f
 ```
+Press `Ctrl+C` once you see the backend and Nginx settle (stop restarting).
 
-### 6. Create your site and install ERPNext
+---
+
+## Part 5 — Create your site
+
+Still inside `frappe_docker/`:
 ```bash
 docker compose exec backend bench new-site erp.mechotronix.in \
-  --mariadb-root-password <the DB_PASSWORD you set> \
-  --admin-password <choose a strong admin password> \
-  --install-app erpnext
+  --mariadb-root-password <the DB_PASSWORD from your .env> \
+  --admin-password <choose a strong admin password, save it> \
+  --install-app erpnext \
+  --set-default
 ```
-This creates the MariaDB database for the site and installs the ERPNext app
-(accounting, inventory, sales, purchase, HR/payroll modules) into it.
+This:
+- Creates a MariaDB database for `erp.mechotronix.in`
+- Installs the ERPNext app (accounting, stock, sales, purchase, HR/payroll, CRM)
+- Sets it as the default site for this container
 
-### 7. Install the India Compliance app (GST, e-invoice, e-way bill, TDS)
+Takes a couple of minutes. On success it prints `*** Scheduler is disabled ***`
+or similar — that's expected at this stage (fixed by the running scheduler
+container).
+
+### 5.1 Install the India Compliance app (GST/TDS/PF/ESI for India)
 ```bash
 docker compose exec backend bench get-app india_compliance \
   https://github.com/resilient-tech/india-compliance
+
 docker compose exec backend bench --site erp.mechotronix.in install-app india_compliance
 ```
 
-### 8. Log in
-Browse to `https://erp.mechotronix.in`, log in as `Administrator` with the
-admin password you set in step 6.
+---
 
-Then run the **Setup Wizard**:
-- Company name: Mechotronix, country: India, currency: INR
-- Enter GSTIN `29APHPS6234A1ZV`, PAN, address (Karnataka)
-- Chart of accounts: choose the standard Indian CoA template (it mirrors what
-  was proposed in `DESIGN.md`) — you can rename/add heads afterward
-- Fiscal year: April–March
+## Part 6 — Verify HTTPS is working
+
+Because you configured `compose.https.yaml` with `LETSENCRYPT_EMAIL`, Certbot
+should have already obtained a free SSL certificate for `erp.mechotronix.in`
+(this only works if DNS from step 1.3 was already resolving *before* you ran
+`up -d` in Part 4 — if it wasn't, see Troubleshooting below).
+
+Open a browser and visit:
+```
+https://erp.mechotronix.in
+```
+You should see the ERPNext login page with a valid padlock/HTTPS. Log in:
+- **Username:** `Administrator`
+- **Password:** the `--admin-password` you set in Part 5
 
 ---
 
-## 9. Configure for your compliance needs
-Do these inside ERPNext after setup, referencing `DESIGN.md`:
-1. **Company → GST Settings**: enable e-invoicing/e-way bill if turnover crosses
-   the threshold; set HSN digit requirement.
-2. **Accounts → Tax Withholding Category**: set up your TDS sections and rates
-   (India Compliance ships most standard ones; verify current rates with your CA).
-3. **HR → HR Settings / Payroll**: add your 8 employees, salary structures, PF/ESI
-   settings (India Compliance adds PF/ESI/PT computation for Indian payroll).
-4. **Stock → Warehouse**: create your godowns/locations.
-5. **Users**: create one login per employee, assign roles (Accounts Manager,
-   Stock User, HR Manager, etc.) instead of everyone using Administrator.
+## Part 7 — Run the Setup Wizard
+
+On first login, ERPNext walks you through setup:
+1. **Region:** India, **Currency:** INR
+2. **Company name:** Mechotronix
+3. **Company abbreviation:** e.g. `MX`
+4. **Chart of accounts:** choose the standard **India** template — it maps to
+   the structure already documented in `DESIGN.md`
+5. Fill company address (Karnataka), and later add:
+   - **GSTIN:** `29APHPS6234A1ZV`
+   - PAN, and once entered, TAN (for TDS) under Company settings
+6. **Fiscal year:** April to March
+7. Skip or fill sample-data prompts as you prefer (recommend skipping demo data)
 
 ---
 
-## 10. Backups (critical — do this before going live)
+## Part 8 — Post-setup configuration (compliance & structure)
+
+Do these next, using `DESIGN.md` as the reference for what each should contain:
+
+1. **Settings → Company → GST Settings**
+   - Confirm GSTIN, set e-invoicing/e-way bill toggles if your turnover requires them
+   - Set HSN code digit requirement
+2. **Accounts → Tax Withholding Category**
+   - Set up TDS sections you actually use (contractor payments, professional
+     fees, rent, etc.) — India Compliance ships most standard ones; confirm
+     current rates with your CA (rates/sections change under the new
+     Income-tax Act effective April 2026)
+3. **HR → Employee**
+   - Add your 8 employees: PAN, Aadhaar, UAN, ESI number, date of joining
+4. **HR → Payroll**
+   - Set up Salary Structures; enable PF/ESI/Professional Tax computation
+     (India Compliance / HR module handles the statutory math)
+5. **Stock → Warehouse**
+   - Create your godowns/locations (e.g. Main Store, Workshop)
+6. **Users → New User** (one per employee, not everyone as Administrator)
+   - Assign roles: Accounts Manager, Accounts User, Stock User, HR Manager,
+     Sales User, etc. — least privilege per person
+7. **System Settings → Backup**
+   - Configure automatic cloud backup destination (S3/Dropbox/Google Drive) — see Part 9
+
+---
+
+## Part 9 — Backups (do this before entering real data)
+
+### Manual backup, to confirm it works
 ```bash
-# Manual backup (creates a DB dump + files archive)
+cd ~/frappe_docker
 docker compose exec backend bench --site erp.mechotronix.in backup --with-files
 ```
-Automate it:
-- Add a cron job on the host to run the above nightly and `rsync`/upload the
-  backup folder to off-server storage (S3, Backblaze, Google Drive, etc.)
-- ERPNext also has a built-in **Dropbox/S3/Google Drive backup** setting
-  under System Settings → so it can push encrypted backups automatically —
-  configure that as your primary off-site backup.
+This writes a DB dump + a files archive inside the container's site folder.
 
-## 11. Updates
+### Automate nightly backups + off-site copy
+1. In ERPNext: **Settings → System Settings → Backup** — set backup frequency
+   and connect an S3/Dropbox/Google Drive destination for automatic **off-site**
+   backups. Do this now, don't postpone it.
+2. Additionally, add a host-level cron job as a second safety net:
+   ```bash
+   crontab -e
+   ```
+   Add:
+   ```
+   0 2 * * * cd /home/deploy/frappe_docker && docker compose exec -T backend bench --site erp.mechotronix.in backup --with-files
+   ```
+   (runs nightly at 2 AM)
+
+**Test a restore once**, on a throwaway site, so you know the process works
+before you actually need it.
+
+---
+
+## Part 10 — Updates
+
+Before any update:
 ```bash
-cd frappe_docker
-docker compose exec backend bench --site erp.mechotronix.in migrate
-# or pull new images for a version bump, following frappe_docker's release notes
+docker compose exec backend bench --site erp.mechotronix.in backup --with-files
 ```
-Always take a backup (step 10) before updating.
-
-## 12. Ongoing maintenance checklist
-- Renew is automatic (Certbot container renews Let's Encrypt certs).
-- Monitor disk space — `docker system df` and prune old images periodically.
-- Review the audit log and user list periodically (ERPNext has this built in).
-- Keep `india_compliance` app updated — GST/TDS rule changes ship as updates.
-
----
-
-## If you'd rather not manage a server yourself
-Frappe offers **Frappe Cloud** (official managed hosting) — same ERPNext/India
-Compliance stack, but they run the servers, backups, and updates; you just
-point `erp.mechotronix.in` at them via CNAME. Worth considering if you don't
-have in-house server admin time. Let me know if you want that path compared
-in detail instead.
+Then:
+```bash
+cd ~/frappe_docker
+git pull
+docker compose exec backend bench --site erp.mechotronix.in migrate
+```
+For a major version bump (e.g. version-15 → version-16), check
+`frappe_docker`'s release notes first — sometimes the `.env` image tags need
+updating and containers need recreating (`docker compose up -d` again after
+changing `.env`).
 
 ---
 
-## Summary: database & stack
-| Component | Technology |
-|---|---|
-| Database | **MariaDB** (default & recommended) |
-| Cache / queue / real-time | Redis |
-| App framework | Frappe (Python) |
-| Frontend build | Node.js (build-time only) |
-| Web server | Nginx (in the Docker setup) |
-| SSL | Let's Encrypt via Certbot |
-| Deployment | Docker Compose (`frappe_docker`) |
+## Part 11 — Ongoing maintenance checklist
+
+- [ ] Let's Encrypt renews automatically via the Certbot container — spot-check every few months that HTTPS is still valid
+- [ ] `docker system df` monthly; `docker image prune` to reclaim space from old images
+- [ ] Review **Settings → Audit Trail / User List** periodically
+- [ ] Keep `india_compliance` app updated (`bench update` picks it up) — GST/TDS rules change yearly
+- [ ] Confirm off-site backups are actually landing in S3/Drive, not just running locally
+- [ ] Rotate the `Administrator` password and don't use that account day-to-day
+
+---
+
+## Troubleshooting
+
+**HTTPS/Certbot failed to issue a certificate**
+Almost always because DNS wasn't pointing at the server yet when the stack
+started. Fix DNS (Part 1.3), confirm with `dig erp.mechotronix.in +short`,
+then restart just the proxy/certbot piece:
+```bash
+docker compose -f compose.yaml -f overrides/compose.https.yaml --env-file .env up -d --force-recreate
+```
+
+**A container keeps restarting**
+```bash
+docker compose logs <container-name> --tail=200
+```
+Most common causes: wrong `DB_PASSWORD` in `.env` not matching what MariaDB
+was initialized with (if you changed it after first boot, you'll need to
+reset the DB volume or use the original password), or insufficient RAM (swap
+helps on a 4 GB box — see below).
+
+**Site paginates slowly / server feels underpowered**
+Add swap so background jobs don't OOM-kill:
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+**Forgot the Administrator password**
+```bash
+docker compose exec backend bench --site erp.mechotronix.in set-admin-password <new-password>
+```
+
+---
+
+## Alternative: skip server management entirely
+If steps above feel like more ops work than you want to own, **Frappe
+Cloud** (the framework's official managed hosting) runs the identical
+ERPNext + India Compliance stack for you — updates, backups, scaling
+included. You'd just create a site there and point `erp.mechotronix.in` at
+it with a CNAME instead of an A record. Say the word and I'll write that
+path out in the same level of detail.
