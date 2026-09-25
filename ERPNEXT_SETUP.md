@@ -27,48 +27,69 @@ run a handful of commands.
 
 ---
 
-## Part 1 — Buy and set up the server
+## Part 1 — Buy and set up the server (Hostinger)
 
-### 1.1 Choose a provider and plan
-Any of these work well (pick one — no need to compare deeply):
-- **Hetzner Cloud** — cheapest, EU-based, good performance (CX22: 2 vCPU/4GB ≈ €4/mo)
-- **DigitalOcean** — easy UI, good docs (Basic Droplet: 2 vCPU/4GB ≈ $18/mo)
-- **AWS Lightsail** — if you already use AWS (2 vCPU/4GB plan)
+### 1.1 Buy a VPS plan
+Log in to **hPanel** (hpanel.hostinger.com) → **VPS** → **Get a VPS plan** (or
+if you already have Hosting only, this is a separate purchase — VPS and
+shared hosting are different products on Hostinger).
 
-**Spec to choose:** Ubuntu 22.04 LTS, **2 vCPU / 4 GB RAM / 40+ GB SSD** minimum
-for 8 users. Pick a data center region close to India (Singapore/Mumbai if
-offered) for lower latency.
+Pick a plan sized for 8 users:
+- **KVM 2** (2 vCPU / 8 GB RAM / 100 GB NVMe) is the comfortable choice, or
+- **KVM 1** (1 vCPU / 4 GB RAM) is the bare minimum — KVM 2 is worth the small
+  extra cost since ERPNext + MariaDB + Redis in Docker benefits from headroom.
 
-### 1.2 Create the server
-On your provider's dashboard:
-1. Create a new server/droplet/instance
-2. Image: **Ubuntu 22.04 LTS**
-3. Add your **SSH public key** (if you don't have one, generate on your laptop:
-   `ssh-keygen -t ed25519 -C "you@mechotronix.in"`, then paste
-   `~/.ssh/id_ed25519.pub` into the provider's "SSH Keys" field)
-4. Launch it. Note down the **public IP address** it gives you, e.g. `142.93.x.x`
+During checkout, choose a data center location closest to you (Hostinger
+offers India/Singapore among others) for lower latency.
 
-### 1.3 Point your domain at the server (DNS)
-Log in wherever `mechotronix.in` is registered/managed (GoDaddy, BigRock,
-Cloudflare, whoever you bought/manage the domain through) and open **DNS
-Management / DNS Records**.
+### 1.2 Set up the VPS OS and SSH access
+After purchase, in **hPanel → VPS → your VPS → Overview**:
+1. Click **OS & Panel** (or "Change OS" during first setup)
+2. Choose **Operating System only** (not a control panel) → **Ubuntu 22.04**
+3. Under **SSH Keys** (hPanel → VPS → your VPS → SSH Keys), either:
+   - Add your existing public key (generate one locally first if needed:
+     `ssh-keygen -t ed25519 -C "you@mechotronix.in"`, then paste the contents
+     of `~/.ssh/id_ed25519.pub`), or
+   - Let Hostinger set a root password and use that to log in initially
+4. Apply/reinstall the OS if prompted — this finalizes the setup
 
-Add:
-| Type | Host/Name | Value | TTL |
+Once ready, hPanel shows the VPS's **public IP address** on the Overview
+page, e.g. `195.xxx.xxx.xxx`. Note it down.
+
+Test access from your laptop:
+```bash
+ssh root@<your-vps-ip>
+```
+
+### 1.3 Point mechotronix.in's DNS at the VPS (Hostinger)
+If Hostinger is also where `mechotronix.in`'s DNS is managed (i.e. the domain
+uses Hostinger's nameservers), go to:
+
+**hPanel → Domains → mechotronix.in → DNS / Name Servers → DNS Zone Editor**
+
+Add a new record:
+| Type | Name | Points to (value) | TTL |
 |---|---|---|---|
-| A | `erp` | `<your server's public IP>` | Auto / 3600 |
+| A | `erp` | `<your VPS public IP>` | 14400 (default is fine) |
 
-This makes `erp.mechotronix.in` resolve to your server. Save it.
+Click **Add Record**. This makes `erp.mechotronix.in` resolve to your VPS.
 
-**Wait and verify** (can take a few minutes to a few hours):
+> If `mechotronix.in` is registered elsewhere and only *hosted* on Hostinger
+> (or vice versa), add the same A record in whichever panel actually controls
+> its DNS zone — check **hPanel → Domains → mechotronix.in → DNS** first; if
+> it shows "nameservers not managed by Hostinger," make the change at your
+> registrar instead.
+
+**Wait and verify** (Hostinger's DNS usually propagates within 15–30 minutes,
+occasionally longer):
 ```bash
 # run this from your own laptop
 nslookup erp.mechotronix.in
 # or
 dig erp.mechotronix.in +short
 ```
-It should print your server's IP. Don't move to Part 2 until this works —
-Let's Encrypt (step 5) will fail otherwise.
+It should print your VPS's IP. Don't move to Part 2 until this works —
+Let's Encrypt (Part 4) will fail otherwise.
 
 ---
 
