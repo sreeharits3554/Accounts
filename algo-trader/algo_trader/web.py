@@ -25,6 +25,32 @@ def render_page() -> bytes:
         return WRAP.format(f.read()).encode()
 
 
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+
+
+def _safe_data_path(name: str) -> str:
+    """Only plain *.csv names inside data/ - no paths, no traversal."""
+    if not name or name != os.path.basename(name) or not name.endswith(".csv"):
+        raise ValueError("invalid data file name")
+    path = os.path.join(DATA_DIR, name)
+    if not os.path.isfile(path):
+        raise ValueError(f"data file not found: {name}")
+    return path
+
+
+def list_files() -> list:
+    from .data import load_csv, quality_report
+    out = []
+    if os.path.isdir(DATA_DIR):
+        for n in sorted(os.listdir(DATA_DIR)):
+            if n.endswith(".csv"):
+                try:
+                    out.append({"name": n, **quality_report(load_csv(os.path.join(DATA_DIR, n)))})
+                except Exception as e:  # unreadable file should not break the page
+                    out.append({"name": n, "bars": 0, "days": 0, "warnings": [f"unreadable: {e}"]})
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
@@ -37,13 +63,24 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             return self._send(200, render_page(), "text/html; charset=utf-8")
+        if u.path == "/api/files":
+            return self._send(200, json.dumps(list_files()).encode(), "application/json")
         if u.path == "/api/run":
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
             try:
                 kw = {k: PARAMS[k](v) for k, v in q.items() if k in PARAMS}
                 if not 5 <= kw.get("days", 250) <= 2000:
                     raise ValueError("days must be between 5 and 2000")
-                out = run_to_dict(**kw)
+                if q.get("file"):
+                    from .data import clean_bars, load_csv
+                    bars = clean_bars(load_csv(_safe_data_path(q["file"])))
+                    if not bars:
+                        raise ValueError("no usable bars in that file")
+                    kw.pop("days", None); kw.pop("seed", None)
+                    out = run_to_dict(bars, source=q["file"], **kw)
+                    out["quality"] = next((f for f in list_files() if f["name"] == q["file"]), None)
+                else:
+                    out = run_to_dict(**kw)
                 return self._send(200, json.dumps(out).encode(), "application/json")
             except (ValueError, TypeError) as e:
                 return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")

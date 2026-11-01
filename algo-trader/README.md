@@ -9,6 +9,23 @@ python -m pytest -q
 python -m algo_trader.web                            # GUI at http://127.0.0.1:8765 (localhost only)
 ```
 
+## Syncing real data
+```bash
+# Free, no login. ~60 days of 5-minute bars only (pipeline testing, not validation)
+python -m algo_trader.sync yahoo --symbol NIFTY          # or BANKNIFTY
+
+# Kite Connect (needs the paid Connect plan). Keys come from the environment, never from files in git.
+export KITE_API_KEY=...  KITE_API_SECRET=...
+python -m algo_trader.sync kite-url                       # open it, log in, copy request_token from the redirect
+python -m algo_trader.sync kite-login <request_token>     # saves .kite_session.json (0600, valid for today)
+python -m algo_trader.sync kite --symbol NIFTY --days 730
+
+python -m algo_trader.sync check data/nifty_5minute_kite.csv   # quality report
+```
+Files land in `data/` (git-ignored) and are **merged** on each sync, so history grows. They appear in the GUI's data menu.
+The Kite loader is written to the documented API but has **not been run against the live service yet**;
+the Yahoo endpoint is unofficial and may change. Check the quality report before trusting any backtest.
+
 CSV columns: `timestamp` (ISO, bar start), `open,high,low,close[,volume]`.
 
 ## Design
