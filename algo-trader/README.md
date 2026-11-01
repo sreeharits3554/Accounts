@@ -6,6 +6,7 @@ Milestone 1: **backtester + paper broker** for intraday Nifty/BankNifty. Pure Py
 python -m algo_trader --synthetic-days 250          # sanity run on random-walk data
 python -m algo_trader --csv nifty_5min.csv --qty 75 # your real data
 python -m pytest -q
+python -m algo_trader.web                            # GUI at http://127.0.0.1:8765 (localhost only)
 ```
 
 CSV columns: `timestamp` (ISO, bar start), `open,high,low,close[,volume]`.

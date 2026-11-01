@@ -1,0 +1,453 @@
+<title>Algo Trader Console</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky top bar with tabs; single content column up to 1080px; cards only for data panels. */
+:root{
+  --bg:#f3f4f8; --surface:#ffffff; --ink:#151a2d; --muted:#5b6379; --line:#dcdfea;
+  --accent:#3340c4; --accent-soft:#e7e9fb; --gain:#0d7a5c; --loss:#c0352b; --warn:#9a6200;
+  --gain-soft:#e0f3ec; --loss-soft:#fbe6e3; --warn-soft:#fbefd5; --grid:#e6e8f0;
+  --sans:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e111f; --surface:#161a2e; --ink:#e7e9f5; --muted:#9aa1ba; --line:#292f4d;
+  --accent:#8e99ff; --accent-soft:#242b59; --gain:#3fc9a0; --loss:#ff7b6c; --warn:#e8b24c;
+  --gain-soft:#12362e; --loss-soft:#432020; --warn-soft:#3b2f12; --grid:#23284a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e111f; --surface:#161a2e; --ink:#e7e9f5; --muted:#9aa1ba; --line:#292f4d;
+  --accent:#8e99ff; --accent-soft:#242b59; --gain:#3fc9a0; --loss:#ff7b6c; --warn:#e8b24c;
+  --gain-soft:#12362e; --loss-soft:#432020; --warn-soft:#3b2f12; --grid:#23284a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.bar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding-block:12px}
+.brand{font-weight:700;font-size:17px;letter-spacing:-.01em;display:flex;align-items:baseline;gap:8px}
+.brand small{font:500 11px var(--mono);color:var(--muted);letter-spacing:.04em}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{font:inherit;font-weight:500;color:var(--muted);background:none;border:0;padding:7px 12px;border-radius:6px;cursor:pointer}
+nav button:hover{color:var(--ink)}
+nav button[aria-selected="true"]{color:var(--accent);background:var(--accent-soft)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.spacer{flex:1}
+.mode{font:500 11px var(--mono);letter-spacing:.04em;padding:4px 8px;border-radius:4px;background:var(--warn-soft);color:var(--warn)}
+main{padding-block:24px 56px}
+section[hidden]{display:none}
+h1{font-size:26px;line-height:1.2;letter-spacing:-.02em;margin:0 0 6px;text-wrap:balance}
+h2{font-size:15px;margin:0 0 12px;letter-spacing:0}
+.lede{color:var(--muted);max-width:68ch;margin:0 0 20px}
+.notice{border-left:3px solid var(--warn);background:var(--warn-soft);color:var(--ink);padding:10px 14px;border-radius:0 6px 6px 0;margin-bottom:20px;font-size:14px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;min-width:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr))}
+.tiles{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));margin-bottom:16px}
+.tile{padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:10px;min-width:0}
+.tile .k{font:500 11px var(--mono);color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+.tile .v{font:500 20px var(--mono);margin-top:4px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tile .s{font-size:12px;color:var(--muted);margin-top:2px}
+.pos{color:var(--gain)} .neg{color:var(--loss)}
+.stack{display:flex;flex-direction:column;gap:16px}
+/* pipeline */
+.pipe{list-style:none;margin:0;padding:0;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));counter-reset:none}
+.stage{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;position:relative;min-width:0}
+.stage h3{margin:0 0 4px;font-size:15px}
+.stage p{margin:0 0 10px;color:var(--muted);font-size:13px}
+.stage code{font:12px var(--mono);color:var(--muted);overflow-wrap:anywhere}
+.chip{display:inline-block;font:500 11px var(--mono);letter-spacing:.03em;padding:2px 7px;border-radius:4px;margin-bottom:8px}
+.chip.built{background:var(--gain-soft);color:var(--gain)}
+.chip.next{background:var(--accent-soft);color:var(--accent)}
+.chip.plan{background:var(--grid);color:var(--muted)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.flow{display:flex;align-items:center;gap:8px;color:var(--muted);font:12px var(--mono);margin:10px 0 0;flex-wrap:wrap}
+/* forms */
+.ctrl{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font:500 11px var(--mono);color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+input,select{font:14px var(--mono);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;width:100%;min-width:0}
+button.primary{font:600 14px var(--sans);background:var(--accent);color:#fff;border:0;border-radius:6px;padding:9px 16px;cursor:pointer}
+:root[data-theme="dark"] button.primary{color:#0e111f}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button.primary{color:#0e111f}}
+button.primary:disabled{opacity:.45;cursor:not-allowed}
+.hint{font-size:12px;color:var(--muted);margin-top:8px}
+/* tables */
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font:500 11px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--grid);white-space:nowrap;font-variant-numeric:tabular-nums}
+td.n,th.n{text-align:right;font-family:var(--mono)}
+.side{font:500 11px var(--mono);padding:2px 6px;border-radius:4px}
+.side.LONG{background:var(--gain-soft);color:var(--gain)} .side.SHORT{background:var(--loss-soft);color:var(--loss)}
+.tscroll{max-height:380px;overflow:auto}
+/* svg charts */
+#eqChart,#monthChart{overflow-x:auto}
+svg.chart{width:100%;min-width:620px;height:auto;display:block}
+svg text{fill:var(--muted);font:11px var(--mono)}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.bars{display:flex;flex-direction:column;gap:8px}
+.brow{display:grid;grid-template-columns:70px 1fr 44px;gap:10px;align-items:center;font:12px var(--mono)}
+.btrack{height:10px;background:var(--grid);border-radius:3px;overflow:hidden}
+.btrack b{display:block;height:100%;background:var(--accent)}
+ul.check{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+ul.check label{flex-direction:row;align-items:flex-start;gap:10px;font:14px var(--sans);color:var(--ink);text-transform:none;letter-spacing:0}
+ul.check input{width:auto;margin-top:4px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:14px;margin:0}
+.kv dt{color:var(--muted)} .kv dd{margin:0;font-family:var(--mono);text-align:right}
+.src{display:flex;flex-direction:column;gap:6px}
+.src h3{margin:0;font-size:15px}
+.src p{margin:0;font-size:13px;color:var(--muted)}
+ol.steps{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){nav button{transition:background .15s,color .15s}}
+</style>
+
+<header class="top"><div class="wrap bar">
+  <div class="brand">Algo Trader <small>NIFTY · BANKNIFTY</small></div>
+  <nav role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="overview">Overview</button>
+    <button role="tab" data-tab="backtest">Backtest</button>
+    <button role="tab" data-tab="risk">Risk &amp; go-live</button>
+    <button role="tab" data-tab="data">Data sources</button>
+  </nav>
+  <div class="spacer"></div>
+  <span class="mode" id="mode">…</span>
+</div></header>
+
+<main class="wrap">
+
+<section id="tab-overview" role="tabpanel" hidden>
+  <h1>Rules-first auto-trading for Zerodha</h1>
+  <p class="lede">This app tests a trading rule on past prices, practises it with pretend money, and only then goes near a real Kite account. Every order passes the same risk gate in all three modes.</p>
+  <div class="notice" id="synthNotice">The numbers on this page come from random-walk test data. A random walk has no edge, so a rule that loses here is the correct result. This is not a forecast of real performance.</div>
+
+  <h2>How an order travels</h2>
+  <ol class="pipe">
+    <li class="stage"><span class="chip next">NEXT</span><h3>1 · Market data</h3><p>5-minute index candles from Kite, a CSV, or a free source.</p><code>algo_trader/data.py</code></li>
+    <li class="stage"><span class="chip built">BUILT</span><h3>2 · Strategy</h3><p>Opening Range Breakout baseline. Emits an entry with stop and target.</p><code>algo_trader/strategy.py</code></li>
+    <li class="stage"><span class="chip built">BUILT</span><h3>3 · Risk gate</h3><p>Daily loss cap, trades per day, size cap, kill switch.</p><code>algo_trader/risk.py</code></li>
+    <li class="stage"><span class="chip built">PAPER</span><h3>4 · Broker</h3><p>Paper simulator today. A Kite broker plugs into the same interface.</p><code>algo_trader/broker.py</code></li>
+    <li class="stage"><span class="chip built">BUILT</span><h3>5 · Reports</h3><p>Metrics, equity curve, trade log, and this console.</p><code>algo_trader/export.py</code></li>
+  </ol>
+  <div class="flow">strategy → risk gate → broker (paper | kite) → fills → reports</div>
+
+  <div class="grid g2" style="margin-top:24px">
+    <div class="panel">
+      <h2>Latest run</h2>
+      <div id="ovTiles" class="tiles" style="margin:0;grid-template-columns:repeat(2,1fr)"></div>
+    </div>
+    <div class="panel">
+      <h2>Roadmap</h2>
+      <dl class="kv">
+        <dt>Backtester, paper broker, risk gate</dt><dd><span class="chip built">DONE</span></dd>
+        <dt>This console</dt><dd><span class="chip built">DONE</span></dd>
+        <dt>Real data sync</dt><dd><span class="chip next">NEXT</span></dd>
+        <dt>Walk-forward testing</dt><dd><span class="chip plan">PLANNED</span></dd>
+        <dt>Options layer</dt><dd><span class="chip plan">PLANNED</span></dd>
+        <dt>Kite live broker</dt><dd><span class="chip plan">PLANNED</span></dd>
+        <dt>Swing strategies</dt><dd><span class="chip plan">PLANNED</span></dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section id="tab-backtest" role="tabpanel" hidden>
+  <h1>Backtest</h1>
+  <p class="lede">Opening Range Breakout on 5-minute bars. Orders fill at the next bar's open with slippage; a stop wins over a target when both hit in the same bar.</p>
+  <form class="panel" id="form" style="margin-bottom:16px">
+    <div class="ctrl">
+      <label>Days<input id="p-days" type="number" min="5" max="2000" value="250"></label>
+      <label>Seed<input id="p-seed" type="number" value="1"></label>
+      <label>Qty (units)<input id="p-qty" type="number" min="1" max="150" value="75"></label>
+      <label>Slippage (pts)<input id="p-slippage" type="number" step="0.1" min="0" value="0.5"></label>
+      <label>Reward : risk<input id="p-rr" type="number" step="0.1" min="0.2" value="1.5"></label>
+      <label>Max daily loss ₹<input id="p-max_daily_loss" type="number" min="0" value="5000"></label>
+      <label>Max trades/day<input id="p-max_trades" type="number" min="1" value="3"></label>
+      <button class="primary" id="runBtn" type="submit">Run backtest</button>
+    </div>
+    <div class="hint" id="formHint"></div>
+  </form>
+
+  <div id="bt">
+    <div class="tiles" id="tiles"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <h2>Equity after costs <span style="font-weight:400;color:var(--muted)" id="eqSub"></span></h2>
+      <div id="eqChart"></div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>Cumulative net P&amp;L</span><span><i style="background:var(--loss)"></i>Drawdown from peak</span></div>
+    </div>
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="panel"><h2>Where the money went</h2><div id="cost"></div></div>
+      <div class="panel"><h2>How trades ended</h2><div class="bars" id="reasons"></div></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px"><h2>Monthly net P&amp;L</h2><div id="monthChart"></div></div>
+    <div class="panel">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <h2 style="margin:0">Trades</h2><span class="spacer" style="flex:1"></span>
+        <label style="flex-direction:row;align-items:center;gap:8px">Exit
+          <select id="fReason" style="width:auto"><option value="">all</option></select></label>
+      </div>
+      <div class="tw tscroll"><table><thead><tr><th>Exit time</th><th>Side</th><th class="n">Entry</th><th class="n">Exit</th><th>Reason</th><th class="n">Costs ₹</th><th class="n">Net P&amp;L ₹</th></tr></thead><tbody id="tbody"></tbody></table></div>
+      <div class="hint" id="tcount"></div>
+    </div>
+  </div>
+  <div id="btErr" class="notice" hidden></div>
+</section>
+
+<section id="tab-risk" role="tabpanel" hidden>
+  <h1>Risk &amp; go-live</h1>
+  <p class="lede">The risk gate sits between every strategy and every broker. A rule that cannot pass this checklist does not touch real money.</p>
+  <div class="grid g2">
+    <div class="panel">
+      <h2>Active limits</h2>
+      <dl class="kv" id="limits"></dl>
+      <div class="hint">Entries are refused once any limit is reached. The kill switch blocks all new entries until restarted.</div>
+    </div>
+    <div class="panel">
+      <h2>Worst moments in this run</h2>
+      <dl class="kv" id="worst"></dl>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:16px">
+    <h2>Go-live checklist <span style="font-weight:400;color:var(--muted)" id="ckCount"></span></h2>
+    <ul class="check" id="check"></ul>
+    <div class="hint">Ticks are remembered in this browser only.</div>
+  </div>
+</section>
+
+<section id="tab-data" role="tabpanel" hidden>
+  <h1>Data sources</h1>
+  <p class="lede">Real data is the next milestone. Nothing is connected yet, and the app never stores your Zerodha password or token in this page.</p>
+  <div class="grid g2">
+    <div class="panel src"><span class="chip warn">NOT CONNECTED</span><h3>Kite Connect</h3>
+      <p>Historical candles and live ticks. Needs the paid Connect plan (₹500 per month at last check).</p>
+      <ol class="steps"><li>Subscribe to Connect and create an app in the Kite developer console.</li><li>Put the API key and secret in a local <code>.env</code>.</li><li>Run the daily login once to create the access token.</li></ol></div>
+    <div class="panel src"><span class="chip built">AVAILABLE</span><h3>CSV import</h3>
+      <p>Any file with timestamp, open, high, low, close. Works today:</p>
+      <code style="font:12px var(--mono)">python -m algo_trader --csv nifty_5min.csv</code></div>
+    <div class="panel src"><span class="chip plan">PLANNED</span><h3>Free source (Yahoo Finance)</h3>
+      <p>Long daily history, but only about 60 days of 5-minute bars. Good for testing the pipeline, too short to trust an intraday result.</p></div>
+    <div class="panel src"><span class="chip plan">PLANNED</span><h3>Own recorder</h3>
+      <p>Saves index candles and option-chain snapshots every day from now on. This is the practical fix for the missing history of expired option contracts.</p></div>
+  </div>
+  <div class="panel" style="margin-top:16px">
+    <h2>Sync</h2>
+    <button class="primary" disabled>Sync market data</button>
+    <div class="hint">Enabled in the next milestone, after a data source is chosen.</div>
+  </div>
+</section>
+</main>
+
+<script id="demo-data" type="application/json">null</script>
+<script>
+(function(){
+"use strict";
+var $=function(s){return document.querySelector(s)};
+var DEMO=JSON.parse($("#demo-data").textContent);
+var STATIC=DEMO!==null;
+var DATA=DEMO;
+var NS="http://www.w3.org/2000/svg";
+
+function fmt(n){return Math.round(n).toLocaleString("en-IN")}
+function inr(n){return (n<0?"−":"")+"₹"+fmt(Math.abs(n))}
+function cls(n){return n>0?"pos":n<0?"neg":""}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+
+/* ---------- tabs (hash routed) ---------- */
+var TABS=["overview","backtest","risk","data"];
+function showTab(){
+  var h=(location.hash||"").slice(1); if(TABS.indexOf(h)<0) h="overview";
+  TABS.forEach(function(t){
+    $("#tab-"+t).hidden=(t!==h);
+    $('nav [data-tab="'+t+'"]').setAttribute("aria-selected",t===h);
+  });
+}
+document.querySelectorAll("nav [data-tab]").forEach(function(b){
+  b.addEventListener("click",function(){location.hash=b.dataset.tab});
+});
+window.addEventListener("hashchange",showTab);
+
+/* ---------- chart helpers ---------- */
+function niceTicks(min,max,n){
+  var span=(max-min)||1, raw=span/n, mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  var step=[1,2,2.5,5,10].map(function(m){return m*mag}).find(function(s){return s>=raw});
+  var t=[]; for(var v=Math.ceil(min/step)*step; v<=max+1e-9; v+=step) t.push(Math.round(v*100)/100);
+  return t;
+}
+function el(name,attrs,text){
+  var e=document.createElementNS(NS,name);
+  for(var k in attrs) e.setAttribute(k,attrs[k]);
+  if(text!=null) e.textContent=text; return e;
+}
+function short(n){var a=Math.abs(n); return (n<0?"−":"")+(a>=1e5?(a/1e5).toFixed(a%1e5?1:0)+"L":a>=1e3?(a/1e3)+"k":a)}
+
+function lineChart(host,eq,dd){
+  host.innerHTML="";
+  var W=900,H=300,L=58,R=16,T=12,B=26;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H,class:"chart",role:"img","aria-label":"Equity curve after costs"});
+  if(!eq.length){host.textContent="No trades in this run.";return}
+  var vals=eq.map(function(p){return p.e}).concat(dd.map(function(p){return p.v}),[0]);
+  var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals), pad=(hi-lo)*.06||1;
+  lo-=pad; hi+=pad;
+  var X=function(i){return L+(W-L-R)*(eq.length===1?.5:i/(eq.length-1))};
+  var Y=function(v){return T+(H-T-B)*(1-(v-lo)/(hi-lo))};
+  niceTicks(lo,hi,5).forEach(function(t){
+    svg.appendChild(el("line",{x1:L,x2:W-R,y1:Y(t),y2:Y(t),stroke:"var(--grid)","stroke-width":1}));
+    svg.appendChild(el("text",{x:L-8,y:Y(t)+4,"text-anchor":"end"},short(t)));
+  });
+  svg.appendChild(el("line",{x1:L,x2:W-R,y1:Y(0),y2:Y(0),stroke:"var(--muted)","stroke-width":1,"stroke-dasharray":"3 3"}));
+  var dpath="M"+X(0)+","+Y(0), i;
+  for(i=0;i<dd.length;i++) dpath+=" L"+X(i)+","+Y(dd[i].v);
+  dpath+=" L"+X(dd.length-1)+","+Y(0)+" Z";
+  svg.appendChild(el("path",{d:dpath,fill:"var(--loss)","fill-opacity":.18,stroke:"none"}));
+  var lpath="";
+  for(i=0;i<eq.length;i++) lpath+=(i?" L":"M")+X(i)+","+Y(eq[i].e);
+  svg.appendChild(el("path",{d:lpath,fill:"none",stroke:"var(--accent)","stroke-width":2,"stroke-linejoin":"round"}));
+  var last=eq[eq.length-1];
+  svg.appendChild(el("circle",{cx:X(eq.length-1),cy:Y(last.e),r:4,fill:"var(--accent)"}));
+  var ticks=Math.min(5,eq.length);
+  for(i=0;i<ticks;i++){
+    var idx=ticks===1?0:Math.round(i*(eq.length-1)/(ticks-1));
+    var anchor=i===0?"start":i===ticks-1?"end":"middle";
+    svg.appendChild(el("text",{x:X(idx),y:H-6,"text-anchor":anchor},eq[idx].d));
+  }
+  host.appendChild(svg);
+}
+
+function barChart(host,rows){
+  host.innerHTML="";
+  if(!rows.length){host.textContent="No data.";return}
+  var W=900,H=220,L=58,R=16,T=12,B=26;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H,class:"chart",role:"img","aria-label":"Monthly net P&L"});
+  var vals=rows.map(function(r){return r.pnl}).concat([0]);
+  var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals), pad=(hi-lo)*.08||1; lo-=pad; hi+=pad;
+  var Y=function(v){return T+(H-T-B)*(1-(v-lo)/(hi-lo))};
+  niceTicks(lo,hi,4).forEach(function(t){
+    svg.appendChild(el("line",{x1:L,x2:W-R,y1:Y(t),y2:Y(t),stroke:"var(--grid)"}));
+    svg.appendChild(el("text",{x:L-8,y:Y(t)+4,"text-anchor":"end"},short(t)));
+  });
+  var slot=(W-L-R)/rows.length, bw=Math.max(3,slot*.62);
+  rows.forEach(function(r,i){
+    var x=L+slot*i+(slot-bw)/2, y0=Y(0), y1=Y(r.pnl);
+    svg.appendChild(el("rect",{x:x,y:Math.min(y0,y1),width:bw,height:Math.max(1,Math.abs(y1-y0)),rx:2,fill:r.pnl>=0?"var(--gain)":"var(--loss)"}));
+    if(rows.length<=14||i%Math.ceil(rows.length/8)===0)
+      svg.appendChild(el("text",{x:x+bw/2,y:H-6,"text-anchor":"middle"},r.m.slice(2)));
+  });
+  svg.appendChild(el("line",{x1:L,x2:W-R,y1:Y(0),y2:Y(0),stroke:"var(--muted)"}));
+  host.appendChild(svg);
+}
+
+/* ---------- render ---------- */
+function tile(k,v,s,c){return '<div class="tile"><div class="k">'+k+'</div><div class="v '+(c||"")+'">'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>'}
+
+function render(d){
+  DATA=d; var m=d.metrics, c=d.config;
+  $("#mode").textContent=STATIC?"PREVIEW · SYNTHETIC DATA":(d.synthetic?"LOCAL · SYNTHETIC DATA":"LOCAL · "+String(d.source).toUpperCase());
+  $("#synthNotice").hidden=!d.synthetic;
+  var pf=m.profit_factor==null?"∞":m.profit_factor.toFixed(2);
+  $("#tiles").innerHTML=
+    tile("Net P&amp;L",inr(m.net_pnl),"after all costs",cls(m.net_pnl))+
+    tile("Trades",fmt(m.trades),c.from+" → "+c.to)+
+    tile("Win rate",(m.win_rate*100).toFixed(1)+"%","")+
+    tile("Profit factor",pf,"1.00 = break-even",m.profit_factor!=null&&m.profit_factor<1?"neg":"pos")+
+    tile("Avg trade",inr(m.avg_trade),"",cls(m.avg_trade))+
+    tile("Max drawdown",inr(-m.max_drawdown),"peak to trough","neg");
+  $("#ovTiles").innerHTML=
+    tile("Net P&amp;L",inr(m.net_pnl),"",cls(m.net_pnl))+tile("Trades",fmt(m.trades),"")+
+    tile("Win rate",(m.win_rate*100).toFixed(1)+"%","")+tile("Max drawdown",inr(-m.max_drawdown),"","neg");
+  $("#eqSub").textContent="· "+c.bars.toLocaleString("en-IN")+" bars";
+  lineChart($("#eqChart"),d.equity,d.drawdown);
+  barChart($("#monthChart"),d.monthly);
+
+  var gross=m.gross_pnl;
+  $("#cost").innerHTML='<dl class="kv"><dt>Gross P&amp;L (before costs)</dt><dd class="'+cls(gross)+'">'+inr(gross)+
+    '</dd><dt>Brokerage, taxes, charges</dt><dd class="neg">'+inr(-m.costs)+
+    '</dd><dt>Net P&amp;L</dt><dd class="'+cls(m.net_pnl)+'"><strong>'+inr(m.net_pnl)+'</strong></dd>'+
+    '<dt>Cost per trade</dt><dd>'+inr(m.trades?m.costs/m.trades:0)+'</dd></dl>'+
+    '<div class="hint">Cost rates are placeholders. Verify them against the Zerodha brokerage calculator.</div>';
+
+  var total=m.trades||1, names={stop:"Stop hit",target:"Target hit",eod:"15:15 square-off",end_of_data:"End of data"};
+  $("#reasons").innerHTML=Object.keys(d.exit_reasons).map(function(k){
+    var n=d.exit_reasons[k];
+    return '<div class="brow"><span>'+esc(names[k]||k)+'</span><span class="btrack"><b style="width:'+(n/total*100)+'%"></b></span><span style="text-align:right">'+n+'</span></div>';
+  }).join("");
+
+  var sel=$("#fReason"), cur=sel.value;
+  sel.innerHTML='<option value="">all</option>'+Object.keys(d.exit_reasons).map(function(k){return '<option value="'+esc(k)+'">'+esc(names[k]||k)+'</option>'}).join("");
+  sel.value=cur; renderTrades();
+
+  $("#limits").innerHTML=
+    "<dt>Max daily loss</dt><dd>"+inr(c.max_daily_loss)+"</dd><dt>Max trades per day</dt><dd>"+c.max_trades+
+    "</dd><dt>Max order size</dt><dd>"+c.max_qty+" units</dd><dt>Order size used</dt><dd>"+c.qty+" units</dd>"+
+    "<dt>Slippage assumed</dt><dd>"+c.slippage+" pts / side</dd><dt>Forced square-off</dt><dd>15:15</dd>";
+  var byDay={}; d.trades.forEach(function(t){var k=t.exit.slice(0,10); byDay[k]=(byDay[k]||0)+t.pnl});
+  var days=Object.keys(byDay), wd=days.sort(function(a,b){return byDay[a]-byDay[b]})[0];
+  var wt=d.trades.slice().sort(function(a,b){return a.pnl-b.pnl})[0];
+  $("#worst").innerHTML=
+    "<dt>Worst day</dt><dd class='neg'>"+(wd?inr(byDay[wd])+" · "+wd:"—")+"</dd>"+
+    "<dt>Worst trade</dt><dd class='neg'>"+(wt?inr(wt.pnl):"—")+"</dd>"+
+    "<dt>Max drawdown</dt><dd class='neg'>"+inr(-m.max_drawdown)+"</dd>"+
+    "<dt>Days at loss cap</dt><dd>"+days.filter(function(k){return byDay[k]<=-c.max_daily_loss}).length+"</dd>";
+}
+
+function renderTrades(){
+  if(!DATA) return;
+  var r=$("#fReason").value;
+  var rows=DATA.trades.filter(function(t){return !r||t.reason===r}).slice().reverse();
+  var shown=rows.slice(0,150);
+  $("#tbody").innerHTML=shown.map(function(t){
+    return "<tr><td>"+t.exit.replace("T"," ")+'</td><td><span class="side '+t.side+'">'+t.side+'</span></td><td class="n">'+t.ep.toFixed(1)+
+      '</td><td class="n">'+t.xp.toFixed(1)+"</td><td>"+esc(t.reason)+'</td><td class="n">'+fmt(t.costs)+
+      '</td><td class="n '+cls(t.pnl)+'">'+(t.pnl<0?"−":"")+fmt(Math.abs(t.pnl))+"</td></tr>";
+  }).join("");
+  $("#tcount").textContent="Showing "+shown.length+" of "+rows.length+" trades, newest first.";
+}
+$("#fReason").addEventListener("change",renderTrades);
+
+/* ---------- run (local server only) ---------- */
+var IDS=["days","seed","qty","slippage","rr","max_daily_loss","max_trades"];
+function runBacktest(){
+  var q=IDS.map(function(k){return k+"="+encodeURIComponent($("#p-"+k).value)}).join("&");
+  $("#runBtn").disabled=true; $("#btErr").hidden=true;
+  return fetch("/api/run?"+q).then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){ if(!x.ok) throw new Error(x.j.error||"Run failed"); render(x.j); })
+    .catch(function(e){ $("#btErr").textContent="Could not run: "+e.message; $("#btErr").hidden=false; })
+    .then(function(){ $("#runBtn").disabled=false; });
+}
+$("#form").addEventListener("submit",function(e){e.preventDefault(); if(!STATIC) runBacktest();});
+
+/* ---------- checklist ---------- */
+var CHECKS=[
+ "Net P&L is positive after verified costs on at least two years of out-of-sample data",
+ "Cost model checked against the current Zerodha brokerage calculator",
+ "Paper traded on live ticks for at least four weeks, results close to the backtest",
+ "Static IP whitelisted in the Kite developer console",
+ "Daily loss cap and kill switch tested by forcing them to trigger",
+ "First live week at one lot only, with a loss limit you can afford to lose entirely"
+];
+function store(op,k,v){try{return op==="get"?localStorage.getItem(k):localStorage.setItem(k,v)}catch(e){return null}}
+function renderChecks(){
+  var done=0;
+  $("#check").innerHTML=CHECKS.map(function(t,i){
+    var on=store("get","ck"+i)==="1"; if(on) done++;
+    return '<li><label><input type="checkbox" data-i="'+i+'"'+(on?" checked":"")+'><span>'+esc(t)+'</span></label></li>';
+  }).join("");
+  $("#ckCount").textContent="· "+done+" of "+CHECKS.length;
+}
+$("#check").addEventListener("change",function(e){
+  if(e.target.dataset.i!=null){store("set","ck"+e.target.dataset.i,e.target.checked?"1":"0"); renderChecks();}
+});
+
+/* ---------- boot ---------- */
+renderChecks(); showTab();
+if(STATIC){
+  var c=DEMO.config;
+  IDS.forEach(function(k){var i=$("#p-"+k); i.value=c[k]; i.disabled=true});
+  $("#runBtn").disabled=true;
+  $("#formHint").textContent="Preview snapshot. These settings are fixed here; run python -m algo_trader.web on your machine to change them and re-run.";
+  render(DEMO);
+}else{
+  $("#formHint").textContent="Runs on your machine against the same engine as the command line. Synthetic data until a real source is synced.";
+  runBacktest();
+}
+})();
+</script>
